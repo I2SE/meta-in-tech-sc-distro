@@ -21,6 +21,7 @@ SRC_URI += "file://touchscreen.rules \
            file://0003-implment-systemd-sysv-install-for-OE.patch \
            file://99-default.preset \
            file://1000-Revert-meson-stop-creating-enablement-symlinks-in-et.patch \
+           file://0001-job-Don-t-mark-as-redundant-if-deps-are-relevant.patch \
            "
 
 # patches needed by musl
