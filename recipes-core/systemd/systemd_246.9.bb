@@ -8,7 +8,7 @@ DEPENDS = "intltool-native gperf-native libcap util-linux"
 
 SECTION = "base/shell"
 
-inherit useradd pkgconfig meson perlnative update-rc.d update-alternatives qemu systemd gettext bash-completion manpages distro_features_check
+inherit useradd pkgconfig meson perlnative update-rc.d update-alternatives qemu systemd gettext bash-completion manpages features_check
 
 # As this recipe builds udev, respect systemd being in DISTRO_FEATURES so
 # that we don't build both udev and systemd in world builds.
@@ -17,10 +17,11 @@ REQUIRED_DISTRO_FEATURES = "systemd"
 SRC_URI += "file://touchscreen.rules \
            file://00-create-volatile.conf \
            file://init \
+           file://99-default.preset \
            file://0001-binfmt-Don-t-install-dependency-links-at-install-tim.patch \
            file://0003-implment-systemd-sysv-install-for-OE.patch \
-           file://99-default.preset \
-           file://1000-Revert-meson-stop-creating-enablement-symlinks-in-et.patch \
+           file://0001-systemd.pc.in-use-ROOTPREFIX-without-suffixed-slash.patch \
+           file://0001-logind-Restore-chvt-as-non-root-user-without-polkit.patch \
            "
 
 # patches needed by musl
@@ -43,12 +44,14 @@ SRC_URI_MUSL = "\
                file://0019-Hide-__start_BUS_ERROR_MAP-and-__stop_BUS_ERROR_MAP.patch \
                file://0020-missing_type.h-add-__compar_d_fn_t-definition.patch \
                file://0021-avoid-redefinition-of-prctl_mm_map-structure.patch \
-               file://0022-Use-INT_MAX-instead-of-TIME_T_MAX-for-timerfd_settim.patch \
+               file://0021-Handle-missing-LOCK_EX.patch \
+               file://0022-Fix-incompatible-pointer-type-struct-sockaddr_un.patch \
                file://0024-test-json.c-define-M_PIl.patch \
                file://0001-do-not-disable-buffer-in-writing-files.patch \
                file://0002-src-login-brightness.c-include-sys-wait.h.patch \
                file://0003-src-basic-copy.c-include-signal.h.patch \
                file://0004-src-shared-cpu-set-util.h-add-__cpu_mask-definition.patch \
+               file://0001-Handle-missing-gshadow.patch \
                "
 
 PAM_PLUGINS = " \
@@ -58,10 +61,9 @@ PAM_PLUGINS = " \
 "
 
 PACKAGECONFIG ??= " \
-    ${@bb.utils.filter('DISTRO_FEATURES', 'efi ldconfig pam selinux usrmerge polkit', d)} \
+    ${@bb.utils.filter('DISTRO_FEATURES', 'acl audit efi ldconfig pam selinux smack usrmerge polkit', d)} \
     ${@bb.utils.contains('DISTRO_FEATURES', 'wifi', 'rfkill', '', d)} \
     ${@bb.utils.contains('DISTRO_FEATURES', 'x11', 'xkbcommon', '', d)} \
-    acl \
     backlight \
     binfmt \
     gshadow \
@@ -82,10 +84,11 @@ PACKAGECONFIG ??= " \
     randomseed \
     resolved \
     set-time-epoch \
-    smack \
     sysusers \
+    sysvinit \
     timedated \
     timesyncd \
+    userdb \
     utmp \
     vconsole \
     xz \
@@ -99,11 +102,12 @@ PACKAGECONFIG_remove_libc-musl = " \
     nss \
     nss-mymachines \
     nss-resolve \
-    resolved \
-    smack \
     sysusers \
+    userdb \
     utmp \
 "
+
+CFLAGS_append_libc-musl = " -D__UAPI_DEF_ETHHDR=0 "
 
 # Use the upstream systemd serial-getty@.service and rely on
 # systemd-getty-generator instead of using the OE-core specific
@@ -131,7 +135,7 @@ PACKAGECONFIG[hibernate] = "-Dhibernate=true,-Dhibernate=false"
 PACKAGECONFIG[hostnamed] = "-Dhostnamed=true,-Dhostnamed=false"
 PACKAGECONFIG[idn] = "-Didn=true,-Didn=false"
 PACKAGECONFIG[ima] = "-Dima=true,-Dima=false"
-# importd requires curl/xz/zlib/bzip2/gcrypt
+# importd requires journal-upload/xz/zlib/bzip2/gcrypt
 PACKAGECONFIG[importd] = "-Dimportd=true,-Dimportd=false"
 # Update NAT firewall rules
 PACKAGECONFIG[iptc] = "-Dlibiptc=true,-Dlibiptc=false,iptables"
@@ -139,6 +143,7 @@ PACKAGECONFIG[journal-upload] = "-Dlibcurl=true,-Dlibcurl=false,curl"
 PACKAGECONFIG[kmod] = "-Dkmod=true,-Dkmod=false,kmod"
 PACKAGECONFIG[ldconfig] = "-Dldconfig=true,-Dldconfig=false,,ldconfig"
 PACKAGECONFIG[libidn] = "-Dlibidn=true,-Dlibidn=false,libidn"
+PACKAGECONFIG[libidn2] = "-Dlibidn2=true,-Dlibidn2=false,libidn2"
 PACKAGECONFIG[localed] = "-Dlocaled=true,-Dlocaled=false"
 PACKAGECONFIG[logind] = "-Dlogind=true,-Dlogind=false"
 PACKAGECONFIG[lz4] = "-Dlz4=true,-Dlz4=false,lz4"
@@ -165,6 +170,7 @@ PACKAGECONFIG[seccomp] = "-Dseccomp=true,-Dseccomp=false,libseccomp"
 PACKAGECONFIG[selinux] = "-Dselinux=true,-Dselinux=false,libselinux,initscripts-sushell"
 PACKAGECONFIG[smack] = "-Dsmack=true,-Dsmack=false"
 PACKAGECONFIG[sysusers] = "-Dsysusers=true,-Dsysusers=false"
+PACKAGECONFIG[sysvinit] = "-Dsysvinit-path=${sysconfdir}/init.d -Dsysvrcnd-path=${sysconfdir},-Dsysvinit-path= -Dsysvrcnd-path=,,systemd-compat-units update-rc.d"
 # When enabled use reproducble build timestamp if set as time epoch,
 # or build time if not. When disabled, time epoch is unset.
 def build_epoch(d):
@@ -175,9 +181,11 @@ PACKAGECONFIG[timedated] = "-Dtimedated=true,-Dtimedated=false"
 PACKAGECONFIG[timesyncd] = "-Dtimesyncd=true,-Dtimesyncd=false"
 PACKAGECONFIG[usrmerge] = "-Dsplit-usr=false,-Dsplit-usr=true"
 PACKAGECONFIG[sbinmerge] = "-Dsplit-bin=false,-Dsplit-bin=true"
+PACKAGECONFIG[userdb] = "-Duserdb=true,-Duserdb=false"
 PACKAGECONFIG[utmp] = "-Dutmp=true,-Dutmp=false"
 PACKAGECONFIG[valgrind] = "-DVALGRIND=1,,valgrind"
 PACKAGECONFIG[vconsole] = "-Dvconsole=true,-Dvconsole=false,,${PN}-vconsole-setup"
+PACKAGECONFIG[xdg-autostart] = "-Dxdg-autostart=true,-Dxdg-autostart=false"
 # Verify keymaps on locale change
 PACKAGECONFIG[xkbcommon] = "-Dxkbcommon=true,-Dxkbcommon=false,libxkbcommon"
 PACKAGECONFIG[xz] = "-Dxz=true,-Dxz=false,xz"
@@ -198,7 +206,6 @@ EXTRA_OEMESON += "-Dnobody-user=nobody \
                   -Dnobody-group=nobody \
                   -Drootlibdir=${rootlibdir} \
                   -Drootprefix=${rootprefix} \
-                  -Dsysvrcnd-path=${sysconfdir} \
                   -Ddefault-locale=C \
                   "
 
@@ -226,7 +233,9 @@ do_install() {
 
 	install -d ${D}${sysconfdir}/udev/rules.d/
 	install -d ${D}${sysconfdir}/tmpfiles.d
-	install -m 0644 ${WORKDIR}/*.rules ${D}${sysconfdir}/udev/rules.d/
+	for rule in $(find ${WORKDIR} -maxdepth 1 -type f -name "*.rules"); do
+		install -m 0644 $rule ${D}${sysconfdir}/udev/rules.d/
+	done
 
 	install -m 0644 ${WORKDIR}/00-create-volatile.conf ${D}${sysconfdir}/tmpfiles.d/
 
@@ -234,6 +243,7 @@ do_install() {
 		install -d ${D}${sysconfdir}/init.d
 		install -m 0755 ${WORKDIR}/init ${D}${sysconfdir}/init.d/systemd-udevd
 		sed -i s%@UDEVD@%${rootlibexecdir}/systemd/systemd-udevd% ${D}${sysconfdir}/init.d/systemd-udevd
+		install -Dm 0755 ${S}/src/systemctl/systemd-sysv-install.SKELETON ${D}${systemd_unitdir}/systemd-sysv-install
 	fi
 
 	chown root:systemd-journal ${D}/${localstatedir}/log/journal
@@ -273,7 +283,10 @@ do_install() {
 		sed -i -e "s%^L! /etc/resolv.conf.*$%L! /etc/resolv.conf - - - - ../run/systemd/resolve/resolv.conf%g" ${D}${exec_prefix}/lib/tmpfiles.d/etc.conf
 		ln -s ../run/systemd/resolve/resolv.conf ${D}${sysconfdir}/resolv-conf.systemd
 	fi
-	install -Dm 0755 ${S}/src/systemctl/systemd-sysv-install.SKELETON ${D}${systemd_unitdir}/systemd-sysv-install
+	if ${@bb.utils.contains('DISTRO_FEATURES', 'x11', 'false', 'true', d)}; then
+		rm ${D}${exec_prefix}/lib/tmpfiles.d/x11.conf
+		rm -r ${D}${sysconfdir}/X11
+	fi
 
 	# If polkit is setup fixup permissions and ownership
 	if ${@bb.utils.contains('PACKAGECONFIG', 'polkit', 'true', 'false', d)}; then
@@ -293,10 +306,6 @@ do_install() {
 	# install default policy for presets
 	# https://www.freedesktop.org/wiki/Software/systemd/Preset/#howto
 	install -Dm 0644 ${WORKDIR}/99-default.preset ${D}${systemd_unitdir}/system-preset/99-default.preset
-
-    # We use package postinsts for the hwdb update, as the update service is
-    # easily triggered for no reason and will slow down boots.
-    find ${D} -name systemd-hwdb-update.service -delete
 }
 
 python populate_packages_prepend (){
@@ -305,7 +314,7 @@ python populate_packages_prepend (){
 }
 PACKAGES_DYNAMIC += "^lib(udev|systemd|nss).*"
 
-PACKAGES =+ "\
+PACKAGE_BEFORE_PN = "\
     ${PN}-gui \
     ${PN}-vconsole-setup \
     ${PN}-initramfs \
@@ -319,6 +328,9 @@ PACKAGES =+ "\
     ${PN}-journal-upload \
     ${PN}-journal-remote \
     ${PN}-extra-utils \
+    ${PN}-udev-rules \
+    udev \
+    udev-hwdb \
 "
 
 SUMMARY_${PN}-container = "Tools for containers and VMs"
@@ -346,15 +358,15 @@ USERADD_PACKAGES = "${PN} ${PN}-extra-utils \
                     ${@bb.utils.contains('PACKAGECONFIG', 'journal-upload', '${PN}-journal-upload', '', d)} \
 "
 GROUPADD_PARAM_${PN} = "-r systemd-journal"
-USERADD_PARAM_${PN} += "${@bb.utils.contains('PACKAGECONFIG', 'coredump', '--system -d / -M --shell /bin/nologin systemd-coredump;', '', d)}"
-USERADD_PARAM_${PN} += "${@bb.utils.contains('PACKAGECONFIG', 'networkd', '--system -d / -M --shell /bin/nologin systemd-network;', '', d)}"
+USERADD_PARAM_${PN} += "${@bb.utils.contains('PACKAGECONFIG', 'coredump', '--system -d / -M --shell /sbin/nologin systemd-coredump;', '', d)}"
+USERADD_PARAM_${PN} += "${@bb.utils.contains('PACKAGECONFIG', 'networkd', '--system -d / -M --shell /sbin/nologin systemd-network;', '', d)}"
 USERADD_PARAM_${PN} += "${@bb.utils.contains('PACKAGECONFIG', 'polkit', '--system --no-create-home --user-group --home-dir ${sysconfdir}/polkit-1 polkitd;', '', d)}"
-USERADD_PARAM_${PN} += "${@bb.utils.contains('PACKAGECONFIG', 'resolved', '--system -d / -M --shell /bin/nologin systemd-resolve;', '', d)}"
-USERADD_PARAM_${PN} += "${@bb.utils.contains('PACKAGECONFIG', 'timesyncd', '--system -d / -M --shell /bin/nologin systemd-timesync;', '', d)}"
-USERADD_PARAM_${PN}-extra-utils = "--system -d / -M --shell /bin/nologin systemd-bus-proxy"
-USERADD_PARAM_${PN}-journal-gateway = "--system -d / -M --shell /bin/nologin systemd-journal-gateway"
-USERADD_PARAM_${PN}-journal-remote = "--system -d / -M --shell /bin/nologin systemd-journal-remote"
-USERADD_PARAM_${PN}-journal-upload = "--system -d / -M --shell /bin/nologin systemd-journal-upload"
+USERADD_PARAM_${PN} += "${@bb.utils.contains('PACKAGECONFIG', 'resolved', '--system -d / -M --shell /sbin/nologin systemd-resolve;', '', d)}"
+USERADD_PARAM_${PN} += "${@bb.utils.contains('PACKAGECONFIG', 'timesyncd', '--system -d / -M --shell /sbin/nologin systemd-timesync;', '', d)}"
+USERADD_PARAM_${PN}-extra-utils = "--system -d / -M --shell /sbin/nologin systemd-bus-proxy"
+USERADD_PARAM_${PN}-journal-gateway = "--system -d / -M --shell /sbin/nologin systemd-journal-gateway"
+USERADD_PARAM_${PN}-journal-remote = "--system -d / -M --shell /sbin/nologin systemd-journal-remote"
+USERADD_PARAM_${PN}-journal-upload = "--system -d / -M --shell /sbin/nologin systemd-journal-upload"
 
 FILES_${PN}-analyze = "${bindir}/systemd-analyze"
 
@@ -491,13 +503,23 @@ FILES_${PN}-extra-utils = "\
                         ${rootlibexecdir}/systemd/systemd-cgroups-agent \
 "
 
+FILES_${PN}-udev-rules = "\
+                        ${rootlibexecdir}/udev/rules.d/70-uaccess.rules \
+                        ${rootlibexecdir}/udev/rules.d/71-seat.rules \
+                        ${rootlibexecdir}/udev/rules.d/73-seat-late.rules \
+                        ${rootlibexecdir}/udev/rules.d/99-systemd.rules \
+"
+
 CONFFILES_${PN} = "${sysconfdir}/systemd/coredump.conf \
 	${sysconfdir}/systemd/journald.conf \
 	${sysconfdir}/systemd/logind.conf \
-	${sysconfdir}/systemd/system.conf \
-	${sysconfdir}/systemd/user.conf \
+	${sysconfdir}/systemd/networkd.conf \
+	${sysconfdir}/systemd/pstore.conf \
 	${sysconfdir}/systemd/resolved.conf \
+	${sysconfdir}/systemd/sleep.conf \
+	${sysconfdir}/systemd/system.conf \
 	${sysconfdir}/systemd/timesyncd.conf \
+	${sysconfdir}/systemd/user.conf \
 "
 
 FILES_${PN} = " ${base_bindir}/* \
@@ -536,7 +558,6 @@ FILES_${PN} = " ${base_bindir}/* \
                 ${bindir}/resolvectl \
                 ${bindir}/timedatectl \
                 ${bindir}/bootctl \
-                ${bindir}/kernel-install \
                 ${exec_prefix}/lib/tmpfiles.d/*.conf \
                 ${exec_prefix}/lib/systemd \
                 ${exec_prefix}/lib/modules-load.d \
@@ -544,11 +565,7 @@ FILES_${PN} = " ${base_bindir}/* \
                 ${exec_prefix}/lib/sysusers.d \
                 ${exec_prefix}/lib/environment.d \
                 ${localstatedir} \
-                ${nonarch_base_libdir}/udev/rules.d/70-uaccess.rules \
-                ${nonarch_base_libdir}/udev/rules.d/71-seat.rules \
-                ${nonarch_base_libdir}/udev/rules.d/73-seat-late.rules \
-                ${nonarch_base_libdir}/udev/rules.d/99-systemd.rules \
-                ${nonarch_base_libdir}/modprobe.d/systemd.conf \
+                ${rootlibexecdir}/modprobe.d/systemd.conf \
                 ${datadir}/dbus-1/system.d/org.freedesktop.timedate1.conf \
                 ${datadir}/dbus-1/system.d/org.freedesktop.locale1.conf \
                 ${datadir}/dbus-1/system.d/org.freedesktop.network1.conf \
@@ -562,14 +579,14 @@ FILES_${PN} = " ${base_bindir}/* \
 
 FILES_${PN}-dev += "${base_libdir}/security/*.la ${datadir}/dbus-1/interfaces/ ${sysconfdir}/rpm/macros.systemd"
 
-RDEPENDS_${PN} += "kmod dbus util-linux-mount util-linux-umount udev (= ${EXTENDPKGV}) util-linux-agetty util-linux-fsck"
+RDEPENDS_${PN} += "kmod dbus util-linux-mount util-linux-umount udev (= ${EXTENDPKGV}) systemd-udev-rules util-linux-agetty util-linux-fsck"
 RDEPENDS_${PN} += "${@bb.utils.contains('PACKAGECONFIG', 'serial-getty-generator', '', 'systemd-serialgetty', d)}"
-RDEPENDS_${PN} += "volatile-binds update-rc.d"
+RDEPENDS_${PN} += "volatile-binds"
 
 RRECOMMENDS_${PN} += "systemd-extra-utils \
-                      systemd-compat-units udev-hwdb \
+                      udev-hwdb \
                       e2fsprogs-e2fsck \
-                      kernel-module-autofs4 kernel-module-unix kernel-module-ipv6 \
+                      kernel-module-autofs4 kernel-module-unix kernel-module-ipv6 kernel-module-sch-fq-codel \
                       os-release \
                       systemd-conf \
 "
@@ -577,8 +594,6 @@ RRECOMMENDS_${PN} += "systemd-extra-utils \
 INSANE_SKIP_${PN} += "dev-so libdir"
 INSANE_SKIP_${PN}-dbg += "libdir"
 INSANE_SKIP_${PN}-doc += " libdir"
-
-PACKAGES =+ "udev udev-hwdb"
 
 RPROVIDES_udev = "hotplug"
 
@@ -599,18 +614,48 @@ FILES_udev += "${base_sbindir}/udevd \
                ${rootlibexecdir}/udev/scsi_id \
                ${rootlibexecdir}/udev/v4l_id \
                ${rootlibexecdir}/udev/keymaps \
-               ${rootlibexecdir}/udev/rules.d/*.rules \
+               ${rootlibexecdir}/udev/rules.d/50-udev-default.rules \
+               ${rootlibexecdir}/udev/rules.d/60-autosuspend.rules \
+               ${rootlibexecdir}/udev/rules.d/60-autosuspend-chromiumos.rules \
+               ${rootlibexecdir}/udev/rules.d/60-block.rules \
+               ${rootlibexecdir}/udev/rules.d/60-cdrom_id.rules \
+               ${rootlibexecdir}/udev/rules.d/60-drm.rules \
+               ${rootlibexecdir}/udev/rules.d/60-evdev.rules \
+               ${rootlibexecdir}/udev/rules.d/60-fido-id.rules \
+               ${rootlibexecdir}/udev/rules.d/60-input-id.rules \
+               ${rootlibexecdir}/udev/rules.d/60-persistent-alsa.rules \
+               ${rootlibexecdir}/udev/rules.d/60-persistent-input.rules \
+               ${rootlibexecdir}/udev/rules.d/60-persistent-storage.rules \
+               ${rootlibexecdir}/udev/rules.d/60-persistent-storage-tape.rules \
+               ${rootlibexecdir}/udev/rules.d/60-persistent-v4l.rules \
+               ${rootlibexecdir}/udev/rules.d/60-sensor.rules \
+               ${rootlibexecdir}/udev/rules.d/60-serial.rules \
+               ${rootlibexecdir}/udev/rules.d/61-autosuspend-manual.rules \
+               ${rootlibexecdir}/udev/rules.d/64-btrfs.rules \
+               ${rootlibexecdir}/udev/rules.d/70-joystick.rules \
+               ${rootlibexecdir}/udev/rules.d/70-mouse.rules \
+               ${rootlibexecdir}/udev/rules.d/70-power-switch.rules \
+               ${rootlibexecdir}/udev/rules.d/70-touchpad.rules \
+               ${rootlibexecdir}/udev/rules.d/75-net-description.rules \
+               ${rootlibexecdir}/udev/rules.d/75-probe_mtd.rules \
+               ${rootlibexecdir}/udev/rules.d/78-sound-card.rules \
+               ${rootlibexecdir}/udev/rules.d/80-drivers.rules \
+               ${rootlibexecdir}/udev/rules.d/80-net-setup-link.rules \
+               ${rootlibexecdir}/udev/rules.d/90-vconsole.rules \
                ${sysconfdir}/udev \
                ${sysconfdir}/init.d/systemd-udevd \
                ${systemd_unitdir}/system/*udev* \
                ${systemd_unitdir}/system/*.wants/*udev* \
+               ${base_bindir}/systemd-hwdb \
                ${base_bindir}/udevadm \
                ${base_sbindir}/udevadm \
                ${libexecdir}/${MLPREFIX}udevadm \
                ${datadir}/bash-completion/completions/udevadm \
+               ${systemd_unitdir}/system/systemd-hwdb-update.service \
               "
 
-FILES_udev-hwdb = "${rootlibexecdir}/udev/hwdb.d"
+FILES_udev-hwdb = "${rootlibexecdir}/udev/hwdb.d \
+                   "
 
 RCONFLICTS_${PN} = "tiny-init ${@bb.utils.contains('PACKAGECONFIG', 'resolved', 'resolvconf', '', d)}"
 
@@ -670,7 +715,7 @@ pkg_prerm_${PN}_libc-glibc () {
 PACKAGE_WRITE_DEPS += "qemu-native"
 pkg_postinst_udev-hwdb () {
 	if test -n "$D"; then
-		$INTERCEPT_DIR/postinst_intercept update_udev_hwdb ${PKG} mlprefix=${MLPREFIX} binprefix=${MLPREFIX}
+		$INTERCEPT_DIR/postinst_intercept update_udev_hwdb ${PKG} mlprefix=${MLPREFIX} binprefix=${MLPREFIX} rootlibexecdir="${rootlibexecdir}" PREFERRED_PROVIDER_udev="${PREFERRED_PROVIDER_udev}"
 	else
 		udevadm hwdb --update
 	fi

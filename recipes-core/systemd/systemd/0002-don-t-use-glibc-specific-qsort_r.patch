@@ -1,4 +1,4 @@
-From 49501c80d32c1bc5ecb07f40c324feb82af0b057 Mon Sep 17 00:00:00 2001
+From 263e4100a849f28f62fcfcc1456e9e6de8ee836b Mon Sep 17 00:00:00 2001
 From: Chen Qi <Qi.Chen@windriver.com>
 Date: Mon, 25 Feb 2019 13:41:41 +0800
 Subject: [PATCH] don't use glibc-specific qsort_r
@@ -12,18 +12,18 @@ Signed-off-by: Chen Qi <Qi.Chen@windriver.com>
 Signed-off-by: Andrej Valek <andrej.valek@siemens.com>
 
 ---
- src/basic/sort-util.h              | 14 ------------
- src/libsystemd/sd-hwdb/hwdb-util.c | 19 +++++++++++-----
- src/shared/format-table.c          | 36 ++++++++++++++++++++----------
+ src/basic/sort-util.h              | 14 --------------
+ src/libsystemd/sd-hwdb/hwdb-util.c | 19 ++++++++++++++-----
+ src/shared/format-table.c          | 36 ++++++++++++++++++++++++------------
  3 files changed, 38 insertions(+), 31 deletions(-)
 
 diff --git a/src/basic/sort-util.h b/src/basic/sort-util.h
-index e029f8646eb0..27d68b341cf3 100644
+index a8dc3bb..9541061 100644
 --- a/src/basic/sort-util.h
 +++ b/src/basic/sort-util.h
-@@ -54,17 +54,3 @@ static inline void qsort_safe(void *base, size_t nmemb, size_t size, __compar_fn
+@@ -54,17 +54,3 @@ static inline void _qsort_safe(void *base, size_t nmemb, size_t size, __compar_f
                  int (*_func_)(const typeof(p[0])*, const typeof(p[0])*) = func; \
-                 qsort_safe((p), (n), sizeof((p)[0]), (__compar_fn_t) _func_); \
+                 _qsort_safe((p), (n), sizeof((p)[0]), (__compar_fn_t) _func_); \
          })
 -
 -static inline void qsort_r_safe(void *base, size_t nmemb, size_t size, __compar_d_fn_t compar, void *userdata) {
@@ -40,7 +40,7 @@ index e029f8646eb0..27d68b341cf3 100644
 -                qsort_r_safe((p), (n), sizeof((p)[0]), (__compar_d_fn_t) _func_, userdata); \
 -        })
 diff --git a/src/libsystemd/sd-hwdb/hwdb-util.c b/src/libsystemd/sd-hwdb/hwdb-util.c
-index c83575c7c876..72f8f3a05048 100644
+index 5c75216..3986fc8 100644
 --- a/src/libsystemd/sd-hwdb/hwdb-util.c
 +++ b/src/libsystemd/sd-hwdb/hwdb-util.c
 @@ -128,9 +128,13 @@ static void trie_free(struct trie *trie) {
@@ -84,10 +84,10 @@ index c83575c7c876..72f8f3a05048 100644
  }
  
 diff --git a/src/shared/format-table.c b/src/shared/format-table.c
-index 4617ae8badc4..17d6b9616256 100644
+index 612402c..04638b2 100644
 --- a/src/shared/format-table.c
 +++ b/src/shared/format-table.c
-@@ -1109,31 +1109,33 @@ static int cell_data_compare(TableData *a, size_t index_a, TableData *b, size_t
+@@ -1243,30 +1243,32 @@ static int cell_data_compare(TableData *a, size_t index_a, TableData *b, size_t
          return CMP(index_a, index_b);
  }
  
@@ -95,7 +95,6 @@ index 4617ae8badc4..17d6b9616256 100644
 +static Table *user_table;
 +static int table_data_compare(const void *x, const void *y) {
 +        const size_t *a = x, *b=y;
-         size_t i;
          int r;
  
 -        assert(t);
@@ -115,8 +114,8 @@ index 4617ae8badc4..17d6b9616256 100644
                  return 1;
  
          /* Order other lines by the sorting map */
--        for (i = 0; i < t->n_sort_map; i++) {
-+        for (i = 0; i < user_table->n_sort_map; i++) {
+-        for (size_t i = 0; i < t->n_sort_map; i++) {
++        for (size_t i = 0; i < user_table->n_sort_map; i++) {
                  TableData *d, *dd;
  
 -                d = t->data[*a + t->sort_map[i]];
@@ -131,8 +130,8 @@ index 4617ae8badc4..17d6b9616256 100644
          }
  
          /* Order identical lines by the order there were originally added in */
-@@ -1533,7 +1535,12 @@ int table_print(Table *t, FILE *f) {
-                 for (i = 0; i < n_rows; i++)
+@@ -1844,7 +1846,12 @@ int table_print(Table *t, FILE *f) {
+                 for (size_t i = 0; i < n_rows; i++)
                          sorted[i] = i * t->n_columns;
  
 -                typesafe_qsort_r(sorted, n_rows, table_data_compare, t);
@@ -145,8 +144,8 @@ index 4617ae8badc4..17d6b9616256 100644
          }
  
          if (t->display_map)
-@@ -1997,7 +2004,12 @@ int table_to_json(Table *t, JsonVariant **ret) {
-                 for (i = 0; i < n_rows; i++)
+@@ -2440,7 +2447,12 @@ int table_to_json(Table *t, JsonVariant **ret) {
+                 for (size_t i = 0; i < n_rows; i++)
                          sorted[i] = i * t->n_columns;
  
 -                typesafe_qsort_r(sorted, n_rows, table_data_compare, t);

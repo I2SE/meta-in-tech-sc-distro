@@ -1,10 +1,12 @@
 [Match]
 Name=en* eth*
 KernelCommandLine=!nfsroot
+KernelCommandLine=!ip
 
 [Network]
 DHCP=yes
 
 [DHCP]
+UseMTU=yes
 RouteMetric=10
 ClientIdentifier=mac
