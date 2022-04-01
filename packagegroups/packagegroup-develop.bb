@@ -9,7 +9,7 @@ RDEPENDS:${PN} = " \
     can-utils \
     can-utils-essentials \
     cmake \
-    ${@bb.utils.contains("TUNE_FEATURES", "cortexa7", "cpuburn-a7", "", d)} \
+    ${@bb.utils.contains("TUNE_FEATURES", "cortexa7", "cpuburn-arm-a7", "", d)} \
     fping \
     git \
     iperf2 \
