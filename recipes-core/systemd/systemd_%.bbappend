@@ -5,6 +5,7 @@ SRC_URI += " \
 "
 
 PACKAGECONFIG:remove = " acl backlight binfmt hibernate ima machined polkit smack vconsole nss-mymachines utmp"
+PACKAGECONFIG:append = " polkit_hostnamed_fallback"
 
 RDEPENDS:${PN}:remove = "volatile-binds systemd-compat-units systemd-extra-utils udev-hwdb"
 
